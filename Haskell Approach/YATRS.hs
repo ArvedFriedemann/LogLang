@@ -63,3 +63,6 @@ parseTerm = parseTerminal `chainl1` ((try $ (inlineSpaces1 >> (lookAhead $ try $
 
 parseImpl::Parsec String st (Term String)
 parseImpl = parseTerm `chainl1` ((symbol $ string impsymb) >> return (\x y -> APPL (APPL (VAR impsymb) x) y) )
+
+parseKB::Parsec String st [Term String]
+parseKB = parseImpl `sepEndBy` (symbol (string "." <|> string "\n") )
