@@ -13,6 +13,9 @@ spaces = many $ oneOf "\t\n "
 spaces1::Parsec String st String
 spaces1 = many1 $ oneOf "\t\n "
 
+inlineSpaces::Parsec String st String
+inlineSpaces = many1 $ oneOf "\t "
+
 inlineSpaces1::Parsec String st String
 inlineSpaces1 = many1 $ oneOf "\t "
 
@@ -23,7 +26,7 @@ embrace::Parsec String st a -> Parsec String st b -> Parsec String st c -> Parse
 embrace b p b' = do {b; r<-p; b'; return r}
 
 parens::Parsec String st a -> Parsec String st a
-parens p = embrace (char '(') p (char ')')
+parens p = embrace (char '(' >> inlineSpaces) p (inlineSpaces >> char ')')
 
 symbol::Parsec String st a -> Parsec String st a
 symbol p = embrace (many $ oneOf "\t ") p (many $ oneOf "\t ")
