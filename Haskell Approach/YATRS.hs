@@ -2,67 +2,37 @@ module YATRS where
 
 import Control.Monad
 import Text.Parsec hiding (spaces)
+import Data.Maybe
 
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
 
-impsymb = "->"
-
-spaces::Parsec String st String
-spaces = many $ oneOf "\t\n "
-
-spaces1::Parsec String st String
-spaces1 = many1 $ oneOf "\t\n "
-
-inlineSpaces::Parsec String st String
-inlineSpaces = many1 $ oneOf "\t "
-
-inlineSpaces1::Parsec String st String
-inlineSpaces1 = many1 $ oneOf "\t "
-
-termEnd::Parsec String st ()
-termEnd = lookAhead $ (void $ oneOf ")\n") <|> eof
-
-embrace::Parsec String st a -> Parsec String st b -> Parsec String st c -> Parsec String st b
-embrace b p b' = do {b; r<-p; b'; return r}
-
-parens::Parsec String st a -> Parsec String st a
-parens p = embrace (char '(' >> inlineSpaces) p (inlineSpaces >> char ')')
-
-symbol::Parsec String st a -> Parsec String st a
-symbol p = embrace (many $ oneOf "\t ") p (many $ oneOf "\t ")
-
-followedBy::Parsec String st b -> Parsec String st c -> Parsec String st b
-followedBy p b = do {r<-p; b; return r}
-
-parseIdfrName::Parsec String st String
-parseIdfrName = manyTill anyChar $ lookAhead $ choice $ try <$> [void $ string impsymb, void $ string ".", void $ oneOf "\t\n ()", void $ eof]
-
-parseVar::Parsec String st (Term String)
-parseVar = do {
-  n <- upper <|> (char '_');
-  name <- parseIdfrName;
-  return $ VAR $ n:name
+--rule term, fact, equivalence
+getFit::(Eq a) => Term a -> Term a -> Maybe [(a, Term a)]
+getFit BOT BOT = Just []
+getFit (ATOM x) (ATOM y)
+  | x==y = Just []
+  | otherwise = Nothing
+getFit (VAR x) t = Just [(x, t)]
+getFit (APPL m n) (APPL m' n') = do {
+  x <- getFit m m';
+  y <- getFit n n';
+  return $ x++y
 }
 
-parseAtom::Parsec String st (Term String)
-parseAtom = do {
-  name <- parseIdfrName;
-  case name of
-    [] -> fail ""
-    _ -> return $ ATOM $ name
-}
+isPrefix::(Eq a) => Term a -> Term a -> Bool
+isPrefix t1 t2 = isJust $ getFit t1 t2
 
-parseIdfr::Parsec String st (Term String)
-parseIdfr = (try parseVar) <|> (try parseAtom) <|> (try (string "()" >> (return BOT)))
+fitsEq::(Eq a) => Term a -> Term a -> Bool
+fitsEq t1 t2 = (isPrefix t1 t2) || (isPrefix t2 t1)
 
-parseTerminal::Parsec String st (Term String)
-parseTerminal = parens parseTerm <|> parseIdfr
+--get set of all unrelieveable equalities
+eqIncons::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
+eqIncons matching = [(x, ls) | (x,t)<-matching, let ls = [t' | (y,t')<-matching, (x /= y || (fitsEq t t'))] ]
 
-parseTerm::Parsec String st (Term String)
-parseTerm = parseTerminal `chainl1` ((try $ (inlineSpaces1 >> (lookAhead $ try $ parseTerminal)) ) >> (return APPL))
+applyMatch::(Eq a) => [(a, Term a)] -> Term a -> Term a
+applyMatch _ BOT = BOT
+applyMatch _ x@(ATOM _)  = x
+applyMatch match (VAR x) = fromJust $ lookup x match
+applyMatch match (APPL m n) = APPL (applyMatch match m) (applyMatch match n)
 
-parseImpl::Parsec String st (Term String)
-parseImpl = parseTerm `chainl1` ((symbol $ string impsymb) >> return (\x y -> APPL (APPL (VAR impsymb) x) y) )
-
-parseKB::Parsec String st [Term String]
-parseKB = parseImpl `sepEndBy` (symbol (string "." <|> string "\n") )
+--TODO unit propagation
