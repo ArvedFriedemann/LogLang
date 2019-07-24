@@ -5,6 +5,7 @@ import Text.Parsec hiding (spaces)
 import YATRS
 
 impsymb = "->"
+botsymb = "()"
 
 spaces::Parsec String st String
 spaces = many $ oneOf "\t\n "
@@ -13,7 +14,7 @@ spaces1::Parsec String st String
 spaces1 = many1 $ oneOf "\t\n "
 
 inlineSpaces::Parsec String st String
-inlineSpaces = many1 $ oneOf "\t "
+inlineSpaces = many $ oneOf "\t "
 
 inlineSpaces1::Parsec String st String
 inlineSpaces1 = many1 $ oneOf "\t "
@@ -45,14 +46,18 @@ parseVar = do {
 
 parseAtom::Parsec String st (Term String)
 parseAtom = do {
+  char '`';
+  name <- manyTill anyChar (char '`');
+  return $ ATOM name
+} <|> do {
   name <- parseIdfrName;
   case name of
     [] -> fail ""
-    _ -> return $ ATOM $ name
+    _ -> return $ ATOM name
 }
 
 parseIdfr::Parsec String st (Term String)
-parseIdfr = (try parseVar) <|> (try parseAtom) <|> (try (string "()" >> (return BOT)))
+parseIdfr = (try parseVar) <|> (try parseAtom) <|> (try (string botsymb >> (return BOT)))
 
 parseTerminal::Parsec String st (Term String)
 parseTerminal = parens parseTerm <|> parseIdfr
@@ -61,7 +66,26 @@ parseTerm::Parsec String st (Term String)
 parseTerm = parseTerminal `chainl1` ((try $ (inlineSpaces1 >> (lookAhead $ try $ parseTerminal)) ) >> (return APPL))
 
 parseImpl::Parsec String st (Term String)
-parseImpl = parseTerm `chainl1` ((symbol $ string impsymb) >> return (\x y -> APPL (APPL (VAR impsymb) x) y) )
+parseImpl = parseTerm `chainl1` ((symbol $ string impsymb) >> return (\x y -> APPL (APPL (ATOM impsymb) x) y) )
 
 parseKB::Parsec String st [Term String]
 parseKB = parseImpl `sepEndBy` (symbol (string "." <|> string "\n") )
+
+
+termToString::Term String -> String
+termToString BOT = botsymb
+termToString (ATOM x) = case parse parseAtom "" x of
+                          Right _ -> x
+                          Left  _ -> "`"++x++"`"
+termToString (VAR x)  = case parse parseVar "" x of
+                          Right _ -> x
+                          Left  _ -> '_':x
+termToString a@(APPL (APPL (ATOM op) x) y)
+  | op==impsymb = (termToString x)++" "++impsymb++" "++(termToString y)
+  | otherwise = termToString' a
+termToString x = termToString' x
+
+termToString'::Term String -> String
+termToString' (APPL x b@(APPL y z)) = (termToString x)++" ("++(termToString b)++")"
+termToString' (APPL x y) = (termToString x)++" "++(termToString y)
+termToString' x = termToString x
