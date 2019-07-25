@@ -3,6 +3,8 @@ module YATRS where
 import Control.Monad
 import Text.Parsec hiding (spaces)
 import Data.Maybe
+import Data.Maybe.HT
+import Data.List
 
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
 
@@ -23,21 +25,43 @@ getFit _ _ = Nothing
 --TODO: this matching should just give more constraints. Maybe equality and conjunction os something
 --should be atomic constraints.
 
-propagateEq::(Eq a) => [(a, Term a)] -> Maybe [(a, Term a)]
-propagateEq eqs = []
+getCleanFit::(Eq a) => Term a -> Term a -> Maybe [(a, Term a)]
+getCleanFit t1 t2 = do {
+  fit <- getFit t1 t2;
+  cleanMergeFit $ mergeFit fit
+}
+
+--mergeEqClasses::(Eq a) => [(a, Term a)] -> [([a], Term a)]
+--mergeEqClasses [] = []
+--mergeEqClasses ((x,VAR y):xs) = mergeEqClasses $ map (\(z,t) -> if z == y then (x,t) else (z,t)) xs
+--mergeEqClasses (x:xs) = x:(mergeEqClasses xs)
 
 isPrefix::(Eq a) => Term a -> Term a -> Bool
 isPrefix t1 t2 = isJust $ getFit t1 t2
+
+prefOrder::(Eq a) => Term a -> Term a -> Ordering
+prefOrder t1 t2
+  | t1==t2 = EQ         --TODO incorrect when it comes to variable renaming.
+  | isPrefix t1 t2 = GT
+  | otherwise = LT
 
 fitsEq::(Eq a) => Term a -> Term a -> Bool
 fitsEq t1 t2 = (isPrefix t1 t2) || (isPrefix t2 t1)
 
 --get set of all unrelieveable equalities
-eqIncons::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
-eqIncons matching = [(x, ls) | (x,t)<-matching, let ls = [t' | (y,t')<-matching, (x /= y || (fitsEq t t'))] ]
+--eqIncons::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
+--eqIncons matching = [(x, ls) | (x,t)<-matching, let ls = [t' | (y,t')<-matching, (x /= y || (fitsEq t t'))] ]
 
---satEq::(Eq a) => [(a, [Term a])] -> Bool
---satEq eqs =
+mergeFit::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
+mergeFit matching = [(x, [y | (x',y) <- matching, x==x']) | (x,_) <- matching]
+
+cleanMergeFit::(Eq a) => [(a, [Term a])] -> Maybe [(a, Term a)]
+cleanMergeFit merge = toMaybe (and [isJust y | (_,y) <- tops]) [(x,fromJust y) | (x,y) <- tops]
+  where tops = [(x,highestAbstractor y) | (x,y) <- merge]
+
+highestAbstractor::(Eq a) => [Term a] -> Maybe (Term a)
+highestAbstractor [] = Nothing
+highestAbstractor tms = toMaybe (and [ fitsEq t1 t2 | t1 <- tms, t2 <- tms]) $ head $ sortBy prefOrder tms
 
 applyMatch::(Eq a) => Term a -> [(a, Term a)] -> Term a
 applyMatch BOT _ = BOT
@@ -47,7 +71,7 @@ applyMatch (APPL m n) match = APPL (applyMatch m match) (applyMatch n match)
 
 -- unit, premise, posterior, new fact
 propUnit::(Eq a) => Term a -> Term a -> Term a -> Maybe (Term a)
-propUnit unit prem post = (applyMatch post) <$> (getFit prem unit)
+propUnit unit prem post = (applyMatch post) <$> (getCleanFit prem unit)
 
 --operator, unit, rule, outcome
 propTerms::(Eq a) => Term a -> Term a -> Term a -> Maybe (Term a)

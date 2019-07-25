@@ -3,6 +3,7 @@ module YATRSParser where
 import Control.Monad
 import Text.Parsec hiding (spaces)
 import YATRS
+--import YATRS2
 
 impsymb = "->"
 botsymb = "()"
