@@ -23,8 +23,8 @@ getFit _ _ = Nothing
 --TODO: this matching should just give more constraints. Maybe equality and conjunction os something
 --should be atomic constraints.
 
-cleanFit::(Eq a) => [(a, Term a)] -> [([a], [Term a])]
-cleanFit ((x, VAR y):fit) = undefined
+propagateEq::(Eq a) => [(a, Term a)] -> Maybe [(a, Term a)]
+propagateEq eqs = []
 
 isPrefix::(Eq a) => Term a -> Term a -> Bool
 isPrefix t1 t2 = isJust $ getFit t1 t2
