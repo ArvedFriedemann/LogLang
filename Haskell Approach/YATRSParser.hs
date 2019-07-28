@@ -5,10 +5,15 @@ import Text.Parsec hiding (spaces)
 import Data.Either
 import YATRS
 --import YATRS2
+import Control.Monad.State
 
 impsymb = "->"
 impOp = ATOM impsymb
 botsymb = "()"
+
+defVars::VarState String ()
+defVars = put (('_':) <$> show <$> [1..])
+
 
 spaces::Parsec String st String
 spaces = many $ oneOf "\t\n "
