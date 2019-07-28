@@ -2,10 +2,12 @@ module YATRSParser where
 
 import Control.Monad
 import Text.Parsec hiding (spaces)
+import Data.Either
 import YATRS
 --import YATRS2
 
 impsymb = "->"
+impOp = ATOM impsymb
 botsymb = "()"
 
 spaces::Parsec String st String
@@ -61,7 +63,7 @@ parseIdfr::Parsec String st (Term String)
 parseIdfr = (try parseVar) <|> (try parseAtom) <|> (try (string botsymb >> (return BOT)))
 
 parseTerminal::Parsec String st (Term String)
-parseTerminal = parens parseTerm <|> parseIdfr
+parseTerminal = parens parseImpl <|> parseIdfr
 
 parseTerm::Parsec String st (Term String)
 parseTerm = parseTerminal `chainl1` ((try $ (inlineSpaces1 >> (lookAhead $ try $ parseTerminal)) ) >> (return APPL))
@@ -90,3 +92,25 @@ termToString'::Term String -> String
 termToString' (APPL x b@(APPL y z)) = (termToString x)++" ("++(termToString b)++")"
 termToString' (APPL x y) = (termToString x)++" "++(termToString y)
 termToString' x = termToString x
+
+termFromString::String -> Term String
+termFromString s = case parse parseImpl "" s of
+                      Right t -> t
+                      Left err -> error (show err)
+ts = termFromString
+
+kbFromString::String -> KB String
+kbFromString s = case parse parseKB "" s of
+                      Right t -> t
+                      Left err -> error (show err)
+kbs = kbFromString
+
+formatTerms::[Term String] -> String
+formatTerms terms = unlines $ termToString <$> terms
+
+outputTerms::[Term String] -> IO ()
+outputTerms terms = putStrLn $ formatTerms terms
+
+fromRight::b -> Either a b -> b
+fromRight _ (Right x)= x
+fromRight d _ = d
