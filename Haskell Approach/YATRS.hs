@@ -7,6 +7,7 @@ import Data.Maybe.HT
 import Data.List
 
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
+type KB a = [Term a]
 
 --rule term, fact, equivalence
 getFit::(Eq a) => Term a -> Term a -> Maybe [(a, Term a)]
@@ -75,12 +76,18 @@ propUnit unit prem post = (applyMatch post) <$> (getCleanFit prem unit)
 
 --operator, unit, rule, outcome
 propTerms::(Eq a) => Term a -> Term a -> Term a -> Maybe (Term a)
-propTerms op unit (APPL (APPL op' prem) post)
-  | op == op' = propUnit unit prem post
-  | otherwise = Nothing
-propTerms _ _ _ = Nothing
+propTerms op unit t = (uncurry $ propUnit unit) $ splitRule op t
 --TODO: think about it...if the rule operator get changed, isn't that just like using another universal turing machine?
 --would that lead to the complexity thing you need?
 
-propKB::(Eq a) => Term a -> [Term a] -> [Term a]
-propKB op kb = kb ++ (catMaybes [propTerms op unit rule | unit <- kb, rule <- kb])
+splitRule::(Eq a) => Term a -> Term a -> (Term a, Term a)
+splitRule op t@(APPL (APPL op' prem) post)
+  | op == op' = (prem,post)
+  | otherwise = (t,t)
+splitRule op t = (t,t)
+
+propKB::(Eq a) => Term a -> KB a -> KB a
+propKB op kb = nub $ kb ++ (catMaybes [propTerms op unit rule | unit <- kb, rule <- kb])
+
+consequences::(Eq a) => Term a -> Term a -> KB a -> [Term a]
+consequences op t kb = catMaybes (propTerms op t <$> kb)
