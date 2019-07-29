@@ -6,15 +6,36 @@ import Data.Maybe
 import Data.Maybe.HT
 import Data.List
 import Control.Monad.State
+import Data.Semigroup.Foldable
 
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
 type KB a = [Term a]
-type VarState a b = State [a] b
+type VarState a b = State ([[a]],[a]) b
+
+scopeOn::VarState a ()
+scopeOn = do {
+  (scopes, vars) <- get;
+  put ([]:scopes, vars)
+}
+
+scopeOff::VarState a ()
+scopeOff = do {
+  (x:scopes, vars) <- get;
+  put (scopes, x++vars)
+}
+
+scoped::VarState a b -> VarState a b
+scoped m = do{
+  scopeOn;
+  r <- m;
+  scopeOff;
+  return r
+}
 
 getVar::VarState a a
 getVar = do {
-  (x:xs) <- get;
-  put xs;
+  (s:scopes, x:xs) <- get;
+  put ((x:s):scopes,xs);
   return x
 }
 
@@ -61,6 +82,11 @@ minNewVarTerms t1 t2 = do {
   m2 <- getVarMap visec;
   return $ (exchangeVars' m1 t1, exchangeVars' m2 t2)
 }
+
+getGCTLst::(Eq a) => [Term a] -> VarState a (Maybe (Term a))
+getGCTLst [] = Just $ BOT
+getGCTLst [x] = Just $ x
+getGCTLst (x:xs) = (\m -> (getGCT x) <$> m) =<< (getGCTLst xs)
 
 getGCT::(Eq a) => Term a -> Term a -> VarState a (Maybe (Term a))
 getGCT term1 term2 = do {
@@ -110,43 +136,12 @@ getCleanFit t1 t2 = do {
   cleanMergeFit $ mergeFit fit
 }
 
---mergeEqClasses::(Eq a) => [(a, Term a)] -> [([a], Term a)]
---mergeEqClasses [] = []
---mergeEqClasses ((x,VAR y):xs) = mergeEqClasses $ map (\(z,t) -> if z == y then (x,t) else (z,t)) xs
---mergeEqClasses (x:xs) = x:(mergeEqClasses xs)
-
-isPrefix::(Eq a) => Term a -> Term a -> Bool
-isPrefix t1 t2 = isJust $ getFit t1 t2
-
-prefOrder::(Eq a) => Term a -> Term a -> Ordering
-prefOrder t1 t2
-  | t1==t2 = EQ         --TODO incorrect when it comes to variable renaming.
-  | isPrefix t1 t2 = GT
-  | otherwise = LT
-
-fitsEq::(Eq a) => Term a -> Term a -> Bool
-fitsEq t1 t2 = (isPrefix t1 t2) || (isPrefix t2 t1)
-
---get set of all unrelieveable equalities
---eqIncons::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
---eqIncons matching = [(x, ls) | (x,t)<-matching, let ls = [t' | (y,t')<-matching, (x /= y || (fitsEq t t'))] ]
-
 mergeFit::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
 mergeFit matching = [(x, [y | (x',y) <- matching, x==x']) | (x,_) <- matching]
 
-cleanMergeFit::(Eq a) => [(a, [Term a])] -> Maybe [(a, Term a)]
-cleanMergeFit merge = toMaybe (and [isJust y | (_,y) <- tops]) [(x,fromJust y) | (x,y) <- tops]
-  where tops = [(x,highestAbstractor y) | (x,y) <- merge]
+cleanMergeFit::(Eq a) => [(a, [Term a])] -> VarState a (Maybe [(a, Term a)])
+cleanMergeFit merge = sequence $ (\(t,ts) -> do {ts' <- getGCTLst ts; return (t,ts')}) <$> merge
 
-highestAbstractor::(Eq a) => [Term a] -> Maybe (Term a)
-highestAbstractor [] = Nothing
-highestAbstractor tms = toMaybe (and [ fitsEq t1 t2 | t1 <- tms, t2 <- tms]) $ head $ sortBy prefOrder tms
-
-applyMatch::(Eq a) => Term a -> [(a, Term a)] -> Term a
-applyMatch BOT _ = BOT
-applyMatch x@(ATOM _) _ = x
-applyMatch (VAR x) match = fromJust $ lookup x match
-applyMatch (APPL m n) match = APPL (applyMatch m match) (applyMatch n match)
 
 -- unit, premise, posterior, new fact
 propUnit::(Eq a) => Term a -> Term a -> Term a -> Maybe (Term a)

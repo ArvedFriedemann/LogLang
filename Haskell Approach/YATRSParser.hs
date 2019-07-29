@@ -12,7 +12,7 @@ impOp = ATOM impsymb
 botsymb = "()"
 
 defVars::VarState String ()
-defVars = put (('_':) <$> show <$> [1..])
+defVars = put ([], (('_':) <$> show <$> [1..]))
 
 
 spaces::Parsec String st String
