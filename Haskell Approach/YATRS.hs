@@ -63,11 +63,15 @@ TODO: decontextualize two terms for matching
 -}
 
 getGCT::(Eq a) => Term a -> Term a -> Maybe (Term a)
-getGCT t1 t2 = evalState (do {
-                            mt <- getMCT t1 t2;
-                            case propEq <$> mt of
-                                Just act -> act >>= (\res ->return $ Just res)
-                                Nothing -> return Nothing}) []
+getGCT t1 t2 = evalState (getGCT' t1 t2) []
+
+getGCT'::(Eq a) => Term a -> Term a -> State [(a,Term a)] (Maybe (Term a))
+getGCT' t1 t2 = do {
+      mt <- getMCT t1 t2;
+      case propEq <$> mt of
+          Just act -> act >>= (\res ->return $ Just res)
+          Nothing -> return Nothing
+}
 
 propEq::(Eq a) => Term a -> State [(a,Term a)] (Term a)
 propEq BOT        = return BOT
@@ -93,7 +97,7 @@ getMCT (VAR x) t = do{
   eqs <- get;
   ma <- (case lookup x eqs of
             Just t' -> do {
-                            mtu <- getMCT t t';
+                            mtu <- getGCT' t t';
                             return $ (\tu -> put $ (x,tu):(delete (x,t') eqs)) <$> mtu;
                           }
             Nothing -> return $ Just $ put $ (x,t):eqs);
@@ -101,6 +105,7 @@ getMCT (VAR x) t = do{
     Just act -> act >> (return $ Just (VAR x))
     Nothing  -> return Nothing)
 }
+getMCT t (VAR x) = getMCT (VAR x) t
 getMCT (APPL m n) (APPL m' n') = do{
   mt1 <- getMCT m m';
   mt2 <- getMCT n n';
