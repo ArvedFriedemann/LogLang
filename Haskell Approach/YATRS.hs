@@ -59,7 +59,7 @@ exchangeVars m (APPL x y) = APPL (exchangeVars m x) (exchangeVars m y)
 
 {-
 termToString <$> getGCT (ts "add X (succ X)") (ts "add zero Y")
-TODO: decontextualize two terms for matching
+TODO: use nice variable names after term matching!
 -}
 
 decontTerms::(Eq a) => Term a -> Term a -> VarState a (Term a, Term a)
@@ -68,6 +68,12 @@ decontTerms t1 t2 = do {
   m1 <- getVarMap confVars;
   m2 <- getVarMap confVars;
   return (exchangeVars' m1 t1, exchangeVars' m2 t2)
+}
+
+getGCTdecon::(Eq a) => Term a -> Term a -> VarState a (Maybe (Term a))
+getGCTdecon t1 t2 = do {
+  (dt1, dt2) <- decontTerms t1 t2;
+  return $ getGCT dt1 dt2
 }
 
 getGCTVars::(Eq a) => Term a -> Term a -> (Maybe (Term a), [(a, Term a)])
