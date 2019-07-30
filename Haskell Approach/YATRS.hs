@@ -57,35 +57,65 @@ exchangeVars _ a@(ATOM _) = a
 exchangeVars m v@(VAR x) = fromMaybe v $ lookup x m
 exchangeVars m (APPL x y) = APPL (exchangeVars m x) (exchangeVars m y)
 
+{-
+termToString <$> fst <$> getGCT (ts "add X (succ X)") (ts "add zero Y")
+TODO: decontextualize two terms for matching
+-}
+
 getGCT::(Eq a) => Term a -> Term a -> Maybe (Term a, [(a, Term a)])
 getGCT t1 t2 = do{t <- mt; return (t, eqs)}
   where (mt, eqs) = runState (getGCT' t1 t2) []
 
-getGCT'::(Eq a) => Term a -> Term a -> State [(a,Term a)] (Maybe (Term a))
-getGCT' BOT BOT = return $ Just BOT
-getGCT' (ATOM x) (ATOM x')
-  | x==x'= return $ Just $ ATOM x
-  | otherwise = return Nothing
-getGCT' (VAR x) t = do {
-  eqs <- get;
-  case lookup x eqs of
-    Just t' -> getGCT' t t'
-    Nothing -> do {
-        put ((x,t):eqs);
-        return $ Just t
-    }
+getGCTLst::(Eq a) => [Term a] -> State [(a, Term a)] (Maybe (Term a))
+getGCTLst [] = return $ Just BOT
+getGCTLst [t] = return $ Just t
+getGCTLst (t:ts) = do {
+  mt' <- getGCTLst ts;
+  case (getGCT' t) <$> mt' of
+    Just op -> op
+    Nothing -> return Nothing
 }
-getGCT' t (VAR x) = getGCT' (VAR x) t
-getGCT' (APPL m n) (APPL m' n') = do {
-  mt1 <- getGCT' m m';
-  mt2 <- getGCT' n n';
+
+getGCT'::(Eq a) => Term a -> Term a -> State [(a, Term a)] (Maybe (Term a))
+getGCT' t1 t2 = do {
+  mt <- getMCT t1 t2;
+  eqs <- get;
+  meqs <- sequence $ [ do{ t <- getGCTLst ts; return $ (\t' -> (x,t')) <$> t} | (x,ts) <- mergeEqs eqs];
+  put (catMaybes meqs);
+  return $ do {
+    t <- mt;
+    eqs' <- sequence meqs;
+    return $ exchangeVars eqs' t --here is the bug TODO
+  }
+}
+
+getMCT::(Eq a) => Term a -> Term a -> State [(a, Term a)] (Maybe (Term a))
+getMCT BOT BOT = return $ Just BOT
+getMCT (ATOM x) (ATOM x')
+  | x==x' = return $ Just (ATOM x)
+  | otherwise = return $ Nothing
+getMCT (VAR x) t = do {
+  eqs <- get;
+  put ((x,t):eqs);
+  return $ Just (VAR x)
+}
+getMCT t (VAR x) = getMCT (VAR x) t
+getMCT (APPL m n) (APPL m' n') = do {
+  mt1 <- getMCT m m';
+  mt2 <- getMCT n n';
   return $ do {
     t1 <- mt1;
     t2 <- mt2;
     return $ APPL t1 t2
   }
 }
-getGCT' _ _ = return Nothing
+getMCT _ _ = return Nothing
+
+mergeEqs::(Eq a) => [(a, Term a)] -> [(a, [Term a])]
+mergeEqs eqs = zip (fst <$> head <$> groups) ((map snd) <$> groups)
+  where groups = groupBy (\(a,_)(a',_)-> a==a') eqs
+
+
 
 {-
 -- unit, premise, posterior, new fact
