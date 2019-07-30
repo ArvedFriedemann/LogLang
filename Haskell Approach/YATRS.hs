@@ -58,9 +58,20 @@ exchangeVars m v@(VAR x) = fromMaybe v $ lookup x m
 exchangeVars m (APPL x y) = APPL (exchangeVars m x) (exchangeVars m y)
 
 {-
-termToString <$> fst <$> getGCT (ts "add X (succ X)") (ts "add zero Y")
+termToString <$> getGCT (ts "add X (succ X)") (ts "add zero Y")
 TODO: decontextualize two terms for matching
 -}
+
+decontTerms::(Eq a) => Term a -> Term a -> VarState a (Term a, Term a)
+decontTerms t1 t2 = do {
+  confVars <- return $ vars t1 `intersect` vars t2;
+  m1 <- getVarMap confVars;
+  m2 <- getVarMap confVars;
+  return (exchangeVars' m1 t1, exchangeVars' m2 t2)
+}
+
+getGCTVars::(Eq a) => Term a -> Term a -> (Maybe (Term a), [(a, Term a)])
+getGCTVars t1 t2 = runState (getGCT' t1 t2) []
 
 getGCT::(Eq a) => Term a -> Term a -> Maybe (Term a)
 getGCT t1 t2 = evalState (getGCT' t1 t2) []

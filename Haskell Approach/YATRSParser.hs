@@ -11,8 +11,8 @@ impsymb = "->"
 impOp = ATOM impsymb
 botsymb = "()"
 
-defVars::VarState String ()
-defVars = put ([], (('_':) <$> show <$> [1..]))
+runDefVars::VarState String a -> a
+runDefVars m = evalState m ([[]], (('_':) <$> show <$> [1..]))
 
 
 spaces::Parsec String st String
