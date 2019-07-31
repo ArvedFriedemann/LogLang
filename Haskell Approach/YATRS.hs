@@ -109,21 +109,27 @@ getMCT (VAR x) (VAR y) = do {
   mact <- return $ do {
     (a,t) <- lookupWithKey (elem x) eqs;
     (b,t')<- lookupWithKey (elem y) eqs;
-    guard (a /= b);
-    return (do {
-      mt'' <- getGCT' t t';
-      case mt'' of
-        Just t'' -> do {
-            eqs' <- get;
-            put $ (union a b, t''):(delete (b,t') $ delete (a,t) eqs);
-            return $ Just (VAR x)
-          }
-        Nothing -> return Nothing
-    })
+    if (a /= b) then
+          return (do {
+            mt'' <- getGCT' t t';
+            case mt'' of
+              Just t'' -> do {
+                  eqs' <- get;
+                  put $ (union a b, t''):(delete (b,t') $ delete (a,t) eqs);
+                  return $ Just (VAR x)
+                }
+              Nothing -> return Nothing
+          })
+    else
+          return $ return $ Just t
   };
   (case mact of
     Just act -> act
-    Nothing -> modify ((:) ([x,y], VAR x)) >> return (Just $ VAR x));
+    Nothing -> do {
+      case lookupWithKey (\k->(elem x k) || (elem y k)) eqs of
+        Just (a,t) -> (put $ (union a [x,y], t):(delete (a,t) eqs)) >> return (Just t)
+        Nothing -> modify ((:) ([x,y], VAR x)) >> return (Just $ VAR x)
+    })
 }
 getMCT (VAR x) t = do {
   eqs <- get;
