@@ -4,7 +4,7 @@ import Control.Monad
 import Text.Parsec hiding (spaces, State)
 import Data.Maybe
 import Data.Maybe.HT
-import Data.List
+import Data.List hiding (lookupWithKey)
 import Control.Monad.State
 import Data.Semigroup.Foldable
 
@@ -76,40 +76,63 @@ getGCTdecon t1 t2 = do {
   return $ getGCT dt1 dt2
 }
 
-getGCTVars::(Eq a) => Term a -> Term a -> (Maybe (Term a), [(a, Term a)])
+getGCTVars::(Eq a) => Term a -> Term a -> (Maybe (Term a), [([a], Term a)])
 getGCTVars t1 t2 = runState (getGCT' t1 t2) []
 
 getGCT::(Eq a) => Term a -> Term a -> Maybe (Term a)
 getGCT t1 t2 = evalState (getGCT' t1 t2) []
 
-getGCT'::(Eq a) => Term a -> Term a -> State [(a,Term a)] (Maybe (Term a))
+getGCT'::(Eq a) => Term a -> Term a -> State [([a],Term a)] (Maybe (Term a))
 getGCT' t1 t2 = do {
       mt <- getMCT t1 t2;
       eqs <- get;
       return $ propEq eqs <$> mt
 }
 
-propEq::(Eq a) => [(a,Term a)] -> Term a -> Term a
+propEq::(Eq a) => [([a],Term a)] -> Term a -> Term a
 propEq _ BOT        = BOT
 propEq _ a@(ATOM _) = a
-propEq e (VAR x)    = case lookup x e of
-                          Just t -> propEq e t --WARNING: may not terminate
+propEq e (VAR x)    = case lookupWithKey (elem x) e of
+                          Just (xs,t) -> case t of
+                                          (VAR x') -> if elem x' xs then (VAR $ head xs) else propEq e t
+                                          _ -> propEq e t
                           Nothing -> (VAR x)
 propEq e (APPL m n) = APPL (propEq e m) (propEq e n)
 
-getMCT::(Eq a) => Term a -> Term a -> State [(a,Term a)] (Maybe (Term a))
+getMCT::(Eq a) => Term a -> Term a -> State [([a],Term a)] (Maybe (Term a))
 getMCT BOT BOT = return $ Just BOT
 getMCT (ATOM x) (ATOM x')
   | x==x' = return $ Just (ATOM x)
   | otherwise = return Nothing
-getMCT (VAR x) t = do{
+getMCT (VAR x) (VAR y) = do {
   eqs <- get;
-  ma <- (case lookup x eqs of
-            Just t' -> do {
+  mact <- return $ do {
+    (a,t) <- lookupWithKey (elem x) eqs;
+    (b,t')<- lookupWithKey (elem y) eqs;
+    guard (a /= b);
+    return (do {
+      mt'' <- getGCT' t t';
+      case mt'' of
+        Just t'' -> do {
+            eqs' <- get;
+            put $ (union a b, t''):(delete (b,t') $ delete (a,t) eqs);
+            return $ Just (VAR x)
+          }
+        Nothing -> return Nothing
+    })
+  };
+  (case mact of
+    Just act -> act
+    Nothing -> modify ((:) ([x,y], VAR x)) >> return (Just $ VAR x));
+}
+getMCT (VAR x) t = do {
+  eqs <- get;
+  ma <- (case lookupWithKey (elem x) eqs of
+            Just (x',t') -> do {
                             mtu <- getGCT' t t';
-                            return $ (\tu -> put $ (x,tu):(delete (x,t') eqs)) <$> mtu;
+                            return $ (\tu -> put $ (x',tu):(delete (x',t') eqs)) <$> mtu;
                           }
-            Nothing -> return $ Just $ put $ (x,t):eqs);
+            Nothing -> return $ Just $ put $ ([x],t):eqs);
   (case ma of
     Just act -> act >> (return $ Just (VAR x))
     Nothing  -> return Nothing)
@@ -168,3 +191,16 @@ propKB op kb = do{
 }
 
 --outputTerms $ runDefVars $ propKB impOp (kbs "add zero X X. add (succ X) Y (succ Z) -> add X Y Z.")
+
+
+lookupWith::(Eq a) => (a -> Bool) -> [(a,b)] -> Maybe b
+lookupWith _ [] = Nothing
+lookupWith fkt ((x,y):xs)
+  | fkt x = Just y
+  | otherwise = lookupWith fkt xs
+
+lookupWithKey::(Eq a) => (a -> Bool) -> [(a,b)] -> Maybe (a,b)
+lookupWithKey _ [] = Nothing
+lookupWithKey fkt ((x,y):xs)
+  | fkt x = Just (x,y)
+  | otherwise = lookupWithKey fkt xs
