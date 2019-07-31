@@ -85,25 +85,17 @@ getGCT t1 t2 = evalState (getGCT' t1 t2) []
 getGCT'::(Eq a) => Term a -> Term a -> State [(a,Term a)] (Maybe (Term a))
 getGCT' t1 t2 = do {
       mt <- getMCT t1 t2;
-      case propEq <$> mt of
-          Just act -> act >>= (\res ->return $ Just res)
-          Nothing -> return Nothing
+      eqs <- get;
+      return $ propEq eqs <$> mt
 }
 
-propEq::(Eq a) => Term a -> State [(a,Term a)] (Term a)
-propEq BOT        = return BOT
-propEq a@(ATOM _) = return a
-propEq (VAR x)    = do{
-  eqs <- get;
-  case lookup x eqs of
-    Just t -> propEq t --WARNING: may not terminate
-    Nothing -> return (VAR x)
-}
-propEq (APPL m n) = do{
-  t1 <- propEq m;
-  t2 <- propEq n;
-  return $ APPL t1 t2
-}
+propEq::(Eq a) => [(a,Term a)] -> Term a -> Term a
+propEq _ BOT        = BOT
+propEq _ a@(ATOM _) = a
+propEq e (VAR x)    = case lookup x e of
+                          Just t -> propEq e t --WARNING: may not terminate
+                          Nothing -> (VAR x)
+propEq e (APPL m n) = APPL (propEq e m) (propEq e n)
 
 getMCT::(Eq a) => Term a -> Term a -> State [(a,Term a)] (Maybe (Term a))
 getMCT BOT BOT = return $ Just BOT
@@ -135,26 +127,44 @@ getMCT (APPL m n) (APPL m' n') = do{
 getMCT _ _ = return Nothing
 
 
-{-
--- unit, premise, posterior, new fact
-propUnit::(Eq a) => Term a -> Term a -> Term a -> Maybe (Term a)
-propUnit unit prem post = (applyMatch post) <$> (getCleanFit prem unit)
+
+-- @pre: terms need to be decontextualised
+-- unit, premise, posterior, new fact and new rule
+propRule::(Eq a) => Term a -> Term a -> Term a -> [Term a]
+propRule unit prem post = fromMaybe [] $ do {
+  (mt,eqs) <- return $ getGCTVars unit prem;
+  t <- mt;
+  return $ [t, propEq eqs post]
+}
+
+-- @pre: terms need to be decontextualised
+propUnit::(Eq a) => Term a -> Term a -> [Term a]
+propUnit unit fact = maybeToList (getGCT unit fact)
 
 --operator, unit, rule, outcome
-propTerms::(Eq a) => Term a -> Term a -> Term a -> Maybe (Term a)
-propTerms op unit t = (uncurry $ propUnit unit) $ splitRule op t
+propTerms::(Eq a) => Term a -> Term a -> Term a -> VarState a [Term a]
+propTerms op unit t = do {
+  (u, t') <- decontTerms unit t;
+  return (case splitRule op t of
+             Just (prem, post) -> propRule unit prem post
+             Nothing -> propUnit unit t)
+}
+
+
+
 --TODO: think about it...if the rule operator get changed, isn't that just like using another universal turing machine?
 --would that lead to the complexity thing you need?
 
-splitRule::(Eq a) => Term a -> Term a -> (Term a, Term a)
+splitRule::(Eq a) => Term a -> Term a -> Maybe (Term a, Term a)
 splitRule op t@(APPL (APPL op' prem) post)
-  | op == op' = (prem,post)
-  | otherwise = (t,t)
-splitRule op t = (t,t)
+  | op == op' = Just (prem,post)
+  | otherwise = Nothing
+splitRule op t = Nothing
 
-propKB::(Eq a) => Term a -> KB a -> KB a
-propKB op kb = nub $ kb ++ (catMaybes [propTerms op unit rule | unit <- kb, rule <- kb])
+propKB::(Eq a) => Term a -> KB a -> VarState a (KB a)
+propKB op kb = do{
+  prop <- concat <$> (sequence $ [propTerms op unit rule | unit <- kb, rule <- kb]);
+  return $ nub $ kb ++ prop
+}
 
-consequences::(Eq a) => Term a -> Term a -> KB a -> [Term a]
-consequences op t kb = catMaybes (propTerms op t <$> kb)
--}
+--outputTerms $ runDefVars $ propKB impOp (kbs "add zero X X. add (succ X) Y (succ Z) -> add X Y Z.")
