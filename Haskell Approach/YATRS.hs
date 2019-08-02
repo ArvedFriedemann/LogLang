@@ -11,6 +11,7 @@ import Data.Semigroup.Foldable
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
 type KB a = [Term a]
 type VarState a b = State ([[a]],[a]) b
+type TermEq a = [([a],Term a)]
 
 scopeOn::VarState a ()
 scopeOn = do {
@@ -65,10 +66,29 @@ TODO: use nice variable names after term matching!
 decontTerms::(Eq a) => Term a -> Term a -> VarState a (Term a, Term a)
 decontTerms t1 t2 = do {
   confVars <- return $ vars t1 `intersect` vars t2;
-  m1 <- getVarMap confVars;
   m2 <- getVarMap confVars;
-  return (exchangeVars' m1 t1, exchangeVars' m2 t2)
+  return (t1, exchangeVars' m2 t2)
 }
+
+alphaEq::(Eq a) => Term a -> Term a -> Bool
+alphaEq t1 t2 = evalState (alphaEq' t1 t2) []
+
+alphaEq'::(Eq a) => Term a -> Term a -> State [(a,a)] Bool
+alphaEq' BOT BOT = return True
+alphaEq' (ATOM x) (ATOM y) = return $ x==y
+alphaEq' (VAR x) (VAR y) = do {
+  eqs <- get;
+  contx <- return $ [(a,b) | (a,b) <- eqs, a == x || b == x];
+  conty <- return $ [(a,b) | (a,b) <- eqs, a == y || b == y];
+  if (null contx) && (null conty) then (put $ (x,y):eqs) >> return True else
+    return $ and [ (a==x && b==y) || (a==y && b==x) | (a,b) <- contx ++ conty]
+}
+alphaEq' (APPL m n) (APPL m' n') = do {
+  t1 <- alphaEq' m m';
+  t2 <- alphaEq' n n';
+  return $ t1 && t2;
+}
+alphaEq' _ _ = return False
 
 getGCTdecon::(Eq a) => Term a -> Term a -> VarState a (Maybe (Term a))
 getGCTdecon t1 t2 = do {
@@ -76,20 +96,20 @@ getGCTdecon t1 t2 = do {
   return $ getGCT dt1 dt2
 }
 
-getGCTVars::(Eq a) => Term a -> Term a -> (Maybe (Term a), [([a], Term a)])
+getGCTVars::(Eq a) => Term a -> Term a -> (Maybe (Term a), TermEq a)
 getGCTVars t1 t2 = runState (getGCT' t1 t2) []
 
 getGCT::(Eq a) => Term a -> Term a -> Maybe (Term a)
 getGCT t1 t2 = evalState (getGCT' t1 t2) []
 
-getGCT'::(Eq a) => Term a -> Term a -> State [([a],Term a)] (Maybe (Term a))
+getGCT'::(Eq a) => Term a -> Term a -> State (TermEq a) (Maybe (Term a))
 getGCT' t1 t2 = do {
       mt <- getMCT t1 t2;
       eqs <- get;
       return $ propEq eqs <$> mt
 }
 
-propEq::(Eq a) => [([a],Term a)] -> Term a -> Term a
+propEq::(Eq a) => TermEq a -> Term a -> Term a
 propEq _ BOT        = BOT
 propEq _ a@(ATOM _) = a
 propEq e (VAR x)    = case lookupWithKey (elem x) e of
@@ -99,7 +119,7 @@ propEq e (VAR x)    = case lookupWithKey (elem x) e of
                           Nothing -> (VAR x)
 propEq e (APPL m n) = APPL (propEq e m) (propEq e n)
 
-getMCT::(Eq a) => Term a -> Term a -> State [([a],Term a)] (Maybe (Term a))
+getMCT::(Eq a) => Term a -> Term a -> State (TermEq a) (Maybe (Term a))
 getMCT BOT BOT = return $ Just BOT
 getMCT (ATOM x) (ATOM x')
   | x==x' = return $ Just (ATOM x)
@@ -156,28 +176,45 @@ getMCT (APPL m n) (APPL m' n') = do{
 getMCT _ _ = return Nothing
 
 
-
--- @pre: terms need to be decontextualised
--- unit, premise, posterior, new fact and new rule
-propRule::(Eq a) => Term a -> Term a -> Term a -> [Term a]
-propRule unit prem post = fromMaybe [] $ do {
-  (mt,eqs) <- return $ getGCTVars unit prem;
-  t <- mt;
-  return $ [t, propEq eqs post]
+-- propRule::(Eq a) =>Term a -> Term a -> Term a -> Term a -> [Term a]
+-- propRule op unit prem post = fromMaybe [] $ do {
+--   (t, eqs) <- tupMab1 $ getGCTVars unit prem;
+--   return $ [APPL (APPL op t) (propEq eqs post)]
+-- }
+propRule::(Eq a) =>Term a -> Term a -> Term a -> Term a -> State (TermEq a) [Term a]
+propRule op unit prem post = do {
+  preTerms  <- propUnit unit prem;
+  postTerms <- propUnit unit post;
+  eqs <- get;
+  case (preTerms, postTerms) of
+    (Just t, Nothing) -> return $ [APPL (APPL op t) (propEq eqs post)]
+    (Nothing, Just t) -> return $ [propEq eqs prem,t]
+    (Just t, Just t') -> return $ [t,t']
+    (Nothing, Nothing)-> return $ []
 }
 
--- @pre: terms need to be decontextualised
-propUnit::(Eq a) => Term a -> Term a -> [Term a]
-propUnit unit fact = maybeToList (getGCT unit fact)
-
---operator, unit, rule, outcome
-propTerms::(Eq a) => Term a -> Term a -> Term a -> VarState a [Term a]
-propTerms op unit t = do {
-  (u, t') <- decontTerms unit t;
-  return (case splitRule op t of
-             Just (prem, post) -> propRule unit prem post
-             Nothing -> propUnit unit t)
+--propUnit::(Eq a) => Term a -> Term a -> Maybe (Term a, TermEq a)
+--propUnit unit fact = tupMab1 $ getGCTVars unit fact
+propUnit::(Eq a) => Term a -> Term a -> State (TermEq a) (Maybe (Term a))
+propUnit unit fact = do {
+  eqs <- get;
+  res <- getGCT' unit fact;
+  if isJust res then return () else put eqs;
+  return res
 }
+
+propTerm::(Eq a) => Term a -> Term a -> Term a -> VarState a [Term a]
+propTerm op unit term = do {
+  (u, t) <- decontTerms unit term;
+  return $ evalState (propTerm' op u t) []
+}
+
+propTerm'::(Eq a) => Term a -> Term a -> Term a -> State (TermEq a) [Term a]
+propTerm' op unit term = fromMaybe (maybeToList <$> propUnit unit term) $ do {
+                            (prem, post) <- splitRule op term;
+                            return $ propRule op unit prem post
+                          }
+
 
 
 
@@ -192,12 +229,21 @@ splitRule op t = Nothing
 
 propKB::(Eq a) => Term a -> KB a -> VarState a (KB a)
 propKB op kb = do{
-  prop <- concat <$> (sequence $ [propTerms op unit rule | unit <- kb, rule <- kb]);
-  return $ nub $ kb ++ prop
+  prop <- concat <$> (sequence $ [propTerm op unit rule | unit <- kb, rule <- kb, unit /= rule]);
+  return $ nubWith alphaEq $ kb ++ prop
 }
 
---outputTerms $ runDefVars $ propKB impOp (kbs "add zero X X. add (succ X) Y (succ Z) -> add X Y Z.")
+propKBArbit::(Eq a) => Term a -> KB a -> VarState a (KB a)
+propKBArbit op kb = do {
+  next <- propKB op kb;
+  if next == kb then return kb else propKBArbit op next;
+}
 
+--outputTerms $ runDefVars $ propKBArbit impOp (kbs "add zero X X. add (succ X) Y (succ Z) -> add X Y Z. add (succ zero) (succ (succ zero)) X.")
+
+nubWith::(a->a->Bool) -> [a]->[a]
+nubWith eq [] = []
+nubWith eq (x:xs) = x:(nubWith eq $ filter (not.(eq x)) xs )
 
 lookupWith::(Eq a) => (a -> Bool) -> [(a,b)] -> Maybe b
 lookupWith _ [] = Nothing
@@ -210,3 +256,6 @@ lookupWithKey _ [] = Nothing
 lookupWithKey fkt ((x,y):xs)
   | fkt x = Just (x,y)
   | otherwise = lookupWithKey fkt xs
+
+tupMab1::(Maybe a, b) -> Maybe (a,b)
+tupMab1 (x',y) = x' >>= (\x -> Just (x,y))
