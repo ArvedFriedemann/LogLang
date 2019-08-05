@@ -3,10 +3,10 @@ module YATRS where
 import Control.Monad
 import Text.Parsec hiding (spaces, State)
 import Data.Maybe
-import Data.Maybe.HT
+--import Data.Maybe.HT
 import Data.List hiding (lookupWithKey)
-import Control.Monad.State
-import Data.Semigroup.Foldable
+import Control.Monad.State hiding (foldM)
+--import Data.Semigroup.Foldable
 
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
 type KB a = [Term a]
@@ -184,10 +184,10 @@ getMCT _ _ = return Nothing
 propRule::(Eq a) =>Term a -> Term a -> Term a -> Term a -> State (TermEq a) [Term a]
 propRule op unit prem post = do {
   preTerms  <- propUnit unit prem;
-  postTerms <- propUnit unit post;
+  postTerms <- return $ Nothing;--propUnit unit post;
   eqs <- get;
   case (preTerms, postTerms) of
-    (Just t, Nothing) -> return $ [APPL (APPL op t) (propEq eqs post)]
+    (Just t, Nothing) -> return $ [propEq eqs post] --[APPL (APPL op t) (propEq eqs post)]
     (Nothing, Just t) -> return $ [propEq eqs prem,t]
     (Just t, Just t') -> return $ [t,t']
     (Nothing, Nothing)-> return $ []
@@ -215,7 +215,8 @@ propTerm' op unit term = fromMaybe (maybeToList <$> propUnit unit term) $ do {
                             return $ propRule op unit prem post
                           }
 
-
+propTerm''::(Eq a) => Term a -> Term a -> Term a -> [Term a]
+propTerm'' op unit term = evalState (propTerm' op unit term) []
 
 
 --TODO: think about it...if the rule operator get changed, isn't that just like using another universal turing machine?
@@ -227,14 +228,20 @@ splitRule op t@(APPL (APPL op' prem) post)
   | otherwise = Nothing
 splitRule op t = Nothing
 
+decontKB::(Eq a) => KB a -> VarState a (KB a)
+decontKB kb = sequence [foldM (\x y -> snd <$> decontTerms y x) a (delete a kb) | a <- kb] --doesn't work
+
 propKB::(Eq a) => Term a -> KB a -> VarState a (KB a)
 propKB op kb = do{
-  prop <- concat <$> (sequence $ [propTerm op unit rule | unit <- kb, rule <- kb, unit /= rule]);
+  prop <- return $ concat $ ([propTerm'' op unit rule | unit <- kb, rule <- kb, unit /= rule]);
   return $ nubWith alphaEq $ kb ++ prop
 }
 
 propKBArbit::(Eq a) => Term a -> KB a -> VarState a (KB a)
-propKBArbit op kb = do {
+propKBArbit op kb = (propKBArbit' op) =<< (decontKB kb)
+
+propKBArbit'::(Eq a) => Term a -> KB a -> VarState a (KB a)
+propKBArbit' op kb = do {
   next <- propKB op kb;
   if next == kb then return kb else propKBArbit op next;
 }
