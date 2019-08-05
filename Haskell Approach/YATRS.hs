@@ -3,10 +3,8 @@ module YATRS where
 import Control.Monad
 import Text.Parsec hiding (spaces, State)
 import Data.Maybe
-import Data.Maybe.HT
 import Data.List hiding (lookupWithKey)
 import Control.Monad.State
-import Data.Semigroup.Foldable
 
 data Term a = BOT | ATOM a | VAR a | APPL (Term a) (Term a) deriving (Eq, Show)
 type KB a = [Term a]
